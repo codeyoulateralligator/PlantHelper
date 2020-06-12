@@ -2,71 +2,105 @@
 #include <DS1307.h>
 #include <LiquidCrystal_I2C.h>
 
-int sensorPin = A0; 
-int sensorValue = 0L;  
-int limit = 300; 
-int startup_clockeriino = 7;
+int HUM1_VAL_LOW = 240;
+int HUM1_VAL_HIGH = 600;
+int HUM2_VAL_LOW = 240;
+int HUM2_VAL_HIGH = 600;
+int PIN_HUM1 = A0; 
+int PIN_HUM2 = A1; 
+int PIN_FAN = 7;
+int FAN_RUN_HOUR = 7;
+
+int LOOP_CNT = 0;
+int HUM_UPDATE_FREQ = 5;
 
 DS1307 rtc;
-
-int fan = 7;
-
-LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); //
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 
 void fan_on() {
-  digitalWrite(fan, LOW);
+  digitalWrite(PIN_FAN, LOW);
 }
 
 void fan_off() {
-  digitalWrite(fan, HIGH);
+  digitalWrite(PIN_FAN, HIGH);
 }
 
-void setup() {
+void do_humidity() {
 
-  /*init Serial port*/
-  Serial.begin(9600);
-  while(!Serial); /*wait for serial port to connect - needed for Leonardo only*/
+  int hum1 = analogRead(PIN_HUM1); 
+  int hum2 = analogRead(PIN_HUM2);
 
-  /*init fan*/
-  pinMode(fan, OUTPUT);
+//  Serial.print("HUM1: ");
+//  Serial.println(hum1);
+//  Serial.print("HUM2: ");
+//  Serial.println(hum2);
+  
+  lcd.setCursor(0,3); 
+  lcd.print("Hum: 1: ");  
+  
+  int val1 = 100L - (((hum1 - HUM1_VAL_LOW) * 100L) / HUM1_VAL_HIGH);
+  
+  if (val1 > 100) {
+    val1 = 100;
+  }
+  
+  lcd.print(val1);
+  
+  //lcd.print(100L - ((HUM1_VAL*100L)/1024));
 
-  /*init RTC*/
-  Serial.println("Init RTC...");
+  if (val1 < 100)
+    lcd.print("%  2: ");
+  else
+    lcd.print("% 2: ");
+  
+  
+  int val2 = 100L - (((hum2 - HUM2_VAL_LOW) * 100L) / HUM2_VAL_HIGH);
+  
+  if (val2 > 100) {
+    val2 = 100;
+  }
+  
+  lcd.print(val2);
 
-  /*only set the date+time one time*/
-  //rtc.set(0, 21, 14, 15, 5, 2020); /*08:00:00 24.12.2014 //sec, min, hour, day, month, year*/
-
-  /*stop/pause RTC*/
-  // rtc.stop();
-
-  /*start RTC*/
-  rtc.start();
-
-  lcd.begin(20,4);
-  lcd.backlight();//Power on the back light
- 
+  if (val2 < 100)
+    lcd.print("% ");
+  else
+    lcd.print("%");
 }
 
-void loop() {
-  uint8_t sec, min, hour, day, month;
-  uint16_t year;
- 
-  /*get time from RTC*/
-  rtc.get(&sec, &min, &hour, &day, &month, &year);
+void do_fan(uint8_t hour) {
 
   String fan_str = "OFF";
   // Run from x o'clock for one hour
-  if (hour == startup_clockeriino) {
+  if (hour == FAN_RUN_HOUR) {
     fan_on();
     fan_str = "ON ";
   }
   else {
     fan_off();
   }
+  
+  lcd.setCursor(0,2); 
+  lcd.print("      Fan: ");
+  lcd.print(fan_str);
+}
 
-  sensorValue = analogRead(sensorPin); 
-
+int do_time() {
+  
+  uint8_t sec, min, hour, day, month;
+  uint16_t year;
+ 
+  /*get time from RTC*/
+  rtc.get(&sec, &min, &hour, &day, &month, &year);
+  
   lcd.setCursor(0,0); 
+  
+  //lcd.print(100L - (((HUM2_VAL - 250)*100L)/600));
+  //lcd.print("     ");
+
+  //lcd.setCursor(0,2); 
+  //lcd.print(HUM2_VAL);
+  
   if (day < 10)
     lcd.print("0");
   lcd.print(day);
@@ -91,15 +125,47 @@ void loop() {
     lcd.print("0"); 
   lcd.print(sec);
 
-  lcd.setCursor(0,2); 
-  lcd.print("      Fan: ");
-  lcd.print(fan_str);
+  return hour;
+}
 
-  lcd.setCursor(0,3); 
-  lcd.print(" Humidity: ");  
-  lcd.print(100L - ((sensorValue*100L)/1024));
-  lcd.print("%    ");
+void setup() {
 
+  /*init Serial port*/
+  Serial.begin(9600);
+  while(!Serial); /*wait for serial port to connect - needed for Leonardo only*/
+
+  /*init fan*/
+  pinMode(PIN_FAN, OUTPUT);
+
+  /*init RTC*/
+  Serial.println("Init RTC...");
+
+  /*only set the date+time one time*/
+  //rtc.set(0, 55, 14, 10, 6, 2020); /*08:00:00 24.12.2014 //sec, min, hour, day, month, year*/
+
+  /*stop/pause RTC*/
+  // rtc.stop();
+
+  /*start RTC*/
+  rtc.start();
+
+  lcd.begin(20,4);
+  lcd.backlight();//Power on the back light
+ 
+}
+
+void loop() {
+  
+  uint8_t hour = do_time();
+
+  do_fan(hour);
+
+  if (!(LOOP_CNT % HUM_UPDATE_FREQ)) {
+    do_humidity();
+  }
+  
   delay(1000);
+
+  LOOP_CNT++;
 
 }
