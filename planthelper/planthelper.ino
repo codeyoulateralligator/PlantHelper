@@ -2,35 +2,43 @@
 #include <DS1307.h>
 #include <LiquidCrystal_I2C.h>
 
+// General
 #define NOF_POTS 2
+#define MAIN_DELAY 1000
+
+// Pump
+#define PIN_PUMP 6
 #define PUMP_RUN_TIME 3
-#define PUMP_DELAY 30 // 600
+#define PUMP_DELAY 600 // 600
 #define PUMP_START_LEVEL 95
+#define PUMP_MIN_HOUR 8
+#define PUMP_MAX_HOUR 20
 
-int HUM1_VAL_LOW = 240;
-int HUM1_VAL_HIGH = 600;
-int HUM2_VAL_LOW = 240;
-int HUM2_VAL_HIGH = 600;
-int PIN_HUM1 = A0; 
-int PIN_HUM2 = A1; 
-int PIN_FAN = 7;
-int FAN_RUN_HOUR1 = 6;
-int FAN_RUN_HOUR2 = 7;
+// Humidity
+#define HUM_VAL_LOW 240
+#define HUM_VAL_HIGH 600
+#define PIN_HUM1 A0 
+#define PIN_HUM2 A1 
+#define HUM_UPDATE_FREQ 5
+#define HUM_REG_FREQ 3600 // 3600
 
-int LOOP_CNT = 0;
-int HUM_UPDATE_FREQ = 5;
-int HUM_REG_FREQ = 60; // 3600
+// Fan
+#define PIN_FAN 7
+#define FAN_RUN_HOUR1 6
+#define FAN_RUN_HOUR2 7
 
-
+// 
+int loop_cnt = 0;
 DS1307 rtc;
 
+LiquidCrystal_I2C lcd0(0x26, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 LiquidCrystal_I2C lcd1(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
-LiquidCrystal_I2C lcd2(0x26, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 
 typedef struct 
 {
    LiquidCrystal_I2C lcd;
-   String ID;
+   int id; 
+   String name;  
    int hum_pin;
    
    int hum;
@@ -40,8 +48,8 @@ typedef struct
 
 
 Pot Pots[NOF_POTS] = {
-    { lcd1, "JOG PUNANE", PIN_HUM1, 0, PUMP_DELAY, 0},
-    { lcd2, "LAT KOLLANE", PIN_HUM2, 0, PUMP_DELAY, 0},
+  { lcd0, 0, "LAT KOLLANE", PIN_HUM2, 0, PUMP_DELAY, 0},
+  { lcd1, 1, "JOG PUNANE", PIN_HUM1, 0, PUMP_DELAY, 0},
 };
 
 void fan_on() {
@@ -52,11 +60,20 @@ void fan_off() {
   digitalWrite(PIN_FAN, HIGH);
 }
 
-void do_humidity_reg(Pot* pot) {
-  
-  if (!(LOOP_CNT % HUM_REG_FREQ)) {   
+void pump_on() {
+  digitalWrite(PIN_PUMP, LOW);
+}
 
+void pump_off() {
+  digitalWrite(PIN_PUMP, HIGH);
+}
+
+void do_humidity_reg(Pot* pot) {
+  if (!(loop_cnt % HUM_REG_FREQ)) {   
     if (pot->hum < PUMP_START_LEVEL) {
+
+      // TODO
+      if (pot->id == 0)
       pot->pump_activated = 1;
     }    
   }
@@ -67,24 +84,26 @@ void do_humidity_reg(Pot* pot) {
         pot->lcd.setCursor(0,3); 
         pot->lcd.print("Pump start: "); 
         pot->lcd.print(pot->pump_timer);
-        pot->lcd.print(" sec "); 
+        pot->lcd.print(" sec ");
       }
       else if (pot->pump_timer == 0) {
         pot->lcd.setCursor(0,3); 
         pot->lcd.print("Pump start: NOW!!!  "); 
+        pump_on();
       }
       else if (pot->pump_timer == (0 - PUMP_RUN_TIME)) {
         pot->pump_timer = PUMP_DELAY;
         pot->pump_activated = 0;
         pot->lcd.setCursor(0,3); 
-        pot->lcd.print("Pump start: UNSET   "); 
+        pot->lcd.print("Pump start: UNSET   ");
+        pump_off(); 
       }
   }
   else {
     pot->lcd.setCursor(0,3); 
-    pot->lcd.print("Pump start: UNSET   "); 
+    pot->lcd.print("Pump start: UNSET   ");
   }
-  
+ 
 }
 
 void do_humidity(Pot* pot) {
@@ -99,7 +118,7 @@ void do_humidity(Pot* pot) {
   pot->lcd.setCursor(11,2); 
   pot->lcd.print("Hum: ");  
   
-  int val = 100L - (((hum - HUM1_VAL_LOW) * 100L) / HUM1_VAL_HIGH);
+  int val = 100L - (((hum - HUM_VAL_LOW) * 100L) / HUM_VAL_HIGH);
   
   if (val > 100) {
     val = 100;
@@ -113,13 +132,13 @@ void do_humidity(Pot* pot) {
   else {
     pot->lcd.print("%"); 
   }
-  pot->hum = val;
+  pot->hum = val;  
 }
 
 void do_name(Pot* pot) {
   pot->lcd.setCursor(0,1); 
   pot->lcd.print("Typ: "); 
-  pot->lcd.print(pot->ID); 
+  pot->lcd.print(pot->name); 
 }
 
 void do_fan(uint8_t hour, Pot* pot) {
@@ -190,6 +209,11 @@ void setup() {
 
   /*init fan*/
   pinMode(PIN_FAN, OUTPUT);
+  fan_off();
+
+  /*init PUMP*/
+  pinMode(PIN_PUMP, OUTPUT);
+  pump_off();
 
   /*init RTC*/
   Serial.println("Init RTC...");
@@ -203,38 +227,39 @@ void setup() {
   /*start RTC*/
   rtc.start();
 
-  // TODO
-
-  Pots[0].lcd.begin(20,4);
-  Pots[0].lcd.backlight();//Power on the back light
-
-  Pots[1].lcd.begin(20,4);
-  Pots[1].lcd.backlight();//Power on the back light
-
-  //init_pots();
-
+  int i = 0;
+  
+  for (i = 0; i < NOF_POTS; i++) {
+    Pots[i].lcd.begin(20,4);
+    Pots[i].lcd.backlight();//Power on the back light
+  }
 }
 
 void loop() {
  
   int i = 0;
-
+  
+  //Serial.println("---------------------");
   for (i = 0; i < NOF_POTS; i++) {
-    
+
+    Serial.println(i);
     do_name(&Pots[i]);
     
     uint8_t hour = do_time(&Pots[i]);
     do_fan(hour, &Pots[i]);  
     
-    if (!(LOOP_CNT % HUM_UPDATE_FREQ)) {
+    if (!(loop_cnt % HUM_UPDATE_FREQ)) {
       do_humidity(&Pots[i]);
     }
-  
-    do_humidity_reg(&Pots[i]);
+
+    // Only allow pump to run during daytime 8.00-20.00
+    if ((hour > PUMP_MIN_HOUR) && (hour < PUMP_MAX_HOUR)) {
+      do_humidity_reg(&Pots[i]);
+    }
   }
     
-  delay(1000);
+  delay(MAIN_DELAY);
 
-  LOOP_CNT++;
+  loop_cnt++;
 
 }
