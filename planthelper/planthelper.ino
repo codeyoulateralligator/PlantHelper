@@ -8,14 +8,14 @@
 
 // Pump
 #define PIN_PUMP 6
-#define PUMP_RUN_TIME 3
+#define PUMP_RUN_TIME 5
 #define PUMP_DELAY 600 // 600
-#define PUMP_START_LEVEL 95
+#define PUMP_START_LEVEL 90
 #define PUMP_MIN_HOUR 8
-#define PUMP_MAX_HOUR 20
+#define PUMP_MAX_HOUR 18
 
 // Humidity
-#define HUM_VAL_LOW 240
+#define HUM_VAL_LOW 260
 #define HUM_VAL_HIGH 600
 #define PIN_HUM1 A0 
 #define PIN_HUM2 A1 
@@ -23,11 +23,24 @@
 #define HUM_REG_FREQ 3600 // 3600
 
 // Fan
-#define PIN_FAN 7
-#define FAN_RUN_HOUR1 6
-#define FAN_RUN_HOUR2 7
+#define PIN_FAN1 7
+#define PIN_FAN2 8
+#define FAN_RUN_HOUR_START 8
+#define FAN_RUN_HOUR_END 18
 
-// 
+// Water level sensor (digital)
+#define SEN_WATER1 4
+#define SEN_WATER2 5
+
+// LED
+//#define RED_PIN 2
+//#define GREEN_PIN 3
+//#define BLUE_PIN 4
+
+// Valve
+#define PIN_VALVE1 2
+#define PIN_VALVE2 3
+
 int loop_cnt = 0;
 DS1307 rtc;
 
@@ -40,24 +53,40 @@ typedef struct
    int id; 
    String name;  
    int hum_pin;
+   int water_pin;
+   int valve_pin;
+   int fan_pin;
    
    int hum;
    int pump_timer;
    bool pump_activated;
+   int water_level_alarm;
+   bool want_to_pump;
 } Pot;
 
 
 Pot Pots[NOF_POTS] = {
-  { lcd0, 0, "LAT KOLLANE", PIN_HUM2, 0, PUMP_DELAY, 0},
-  { lcd1, 1, "JOG PUNANE", PIN_HUM1, 0, PUMP_DELAY, 0},
+  { lcd0, 0, "\"LAT KOLLANE\"", PIN_HUM2, SEN_WATER1, PIN_VALVE2, PIN_FAN2, 0, PUMP_DELAY, 0, 0, 0},
+  { lcd1, 1, "\"JOG PUNANE\"", PIN_HUM1, SEN_WATER2, PIN_VALVE1, PIN_FAN1, 0, PUMP_DELAY, 0, 0, 0},
 };
 
-void fan_on() {
-  digitalWrite(PIN_FAN, LOW);
+void RGB_color(int red_light_value, int green_light_value, int blue_light_value)
+{
+//  analogWrite(RED_PIN, red_light_value);
+//  analogWrite(GREEN_PIN, green_light_value);
+//  analogWrite(BLUE_PIN, blue_light_value);
+//  Serial.println("TERE");
+//  Serial.println(red_light_value);
+//  Serial.println(green_light_value);
+//  Serial.println(blue_light_value);
 }
 
-void fan_off() {
-  digitalWrite(PIN_FAN, HIGH);
+void fan_on(int pin) {
+  digitalWrite(pin, LOW);
+}
+
+void fan_off(int pin) {
+  digitalWrite(pin, HIGH);
 }
 
 void pump_on() {
@@ -68,12 +97,40 @@ void pump_off() {
   digitalWrite(PIN_PUMP, HIGH);
 }
 
+void open_valve(int pin) {
+  digitalWrite(pin, LOW);
+}
+
+void close_valve(int pin) {
+  digitalWrite(pin, HIGH);
+}
+
+void do_water_level(Pot* pot) {
+
+  // TODO
+  // pot->water_level_alarm = digitalRead(pot->water_pin);
+  pot->water_level_alarm = 0;
+
+  pot->lcd.setCursor(0,3); 
+  pot->lcd.print("Wat: "); 
+
+  if (pot->water_level_alarm) {
+    pot->lcd.print("ALR");
+  }
+  else {
+    pot->lcd.print("OK!");
+  }
+  
+  Serial.print(pot->name);
+  Serial.print(", water level: ");
+  Serial.println(pot->water_level_alarm);
+}
+
 void do_humidity_reg(Pot* pot) {
   if (!(loop_cnt % HUM_REG_FREQ)) {   
     if (pot->hum < PUMP_START_LEVEL) {
-
-      // TODO
-      if (pot->id == 0)
+      Serial.println("Whaaaaaaaaaaaat");
+      Serial.println(pot->hum);
       pot->pump_activated = 1;
     }    
   }
@@ -81,43 +138,49 @@ void do_humidity_reg(Pot* pot) {
       pot->pump_timer--;
 
       if (pot->pump_timer > 0) {
-        pot->lcd.setCursor(0,3); 
-        pot->lcd.print("Pump start: "); 
+        pot->lcd.setCursor(11,3); 
+        pot->lcd.print("Pmp: "); 
         pot->lcd.print(pot->pump_timer);
-        pot->lcd.print(" sec ");
+
+        if((pot->pump_timer) < 100) {
+          pot->lcd.print(" "); 
+        }
+        else if((pot->pump_timer) < 10) {
+          pot->lcd.print("  "); 
+        }
+        //pot->lcd.print(" sec ");
       }
-      else if (pot->pump_timer == 0) {
-        pot->lcd.setCursor(0,3); 
-        pot->lcd.print("Pump start: NOW!!!  "); 
-        pump_on();
+      else if (pot->pump_timer >= (0 - PUMP_RUN_TIME)) {
+        pot->lcd.setCursor(11,3); 
+        pot->lcd.print("Pmp: NOW "); 
+        Serial.println("!!!Panen puraka!!!");
+        pot->want_to_pump = true;
       }
-      else if (pot->pump_timer == (0 - PUMP_RUN_TIME)) {
+      else if (pot->pump_timer <= (0 - PUMP_RUN_TIME)) {
         pot->pump_timer = PUMP_DELAY;
         pot->pump_activated = 0;
-        pot->lcd.setCursor(0,3); 
-        pot->lcd.print("Pump start: UNSET   ");
-        pump_off(); 
+        pot->lcd.setCursor(11,3); 
+        pot->lcd.print("Pmp: FUT ");
+        pot->want_to_pump = false;
       }
   }
   else {
-    pot->lcd.setCursor(0,3); 
-    pot->lcd.print("Pump start: UNSET   ");
-  }
- 
+    pot->lcd.setCursor(11,3); 
+    pot->lcd.print("Pmp: FUT ");
+  } 
 }
 
 void do_humidity(Pot* pot) {
 
   int hum = analogRead(pot->hum_pin); 
 
-//  Serial.print("HUM1: ");
-//  Serial.println(hum1);
-//  Serial.print("HUM2: ");
-//  Serial.println(hum2);
+  Serial.print(pot->name);
+  Serial.print(": ");
+  Serial.println(hum);
   
   pot->lcd.setCursor(11,2); 
   pot->lcd.print("Hum: ");  
-  
+    
   int val = 100L - (((hum - HUM_VAL_LOW) * 100L) / HUM_VAL_HIGH);
   
   if (val > 100) {
@@ -145,12 +208,12 @@ void do_fan(uint8_t hour, Pot* pot) {
 
   String fan_str = "OFF";
   // Run from x o'clock for one hour
-  if ((hour == FAN_RUN_HOUR1) || (hour == FAN_RUN_HOUR2)) {
-    fan_on();
+  if ((hour >= FAN_RUN_HOUR_START) && (hour < FAN_RUN_HOUR_END)) {
+    fan_on(pot->fan_pin);
     fan_str = "ON ";
   }
   else {
-    fan_off();
+    fan_off(pot->fan_pin);
   }
   
   pot->lcd.setCursor(0,2); 
@@ -201,25 +264,82 @@ int do_time(Pot* pot) {
   return hour;
 }
 
+int do_pump(Pot* pot, int hour) {
+  if (pot->water_level_alarm) {
+    pot->pump_timer = PUMP_DELAY;
+    pot->pump_activated = 0;
+    pot->lcd.setCursor(11,3); 
+    pot->lcd.print("Pmp: ALR ");
+    pot->want_to_pump = false;
+  }
+  else if ((hour > PUMP_MAX_HOUR) || (hour < PUMP_MIN_HOUR)) {
+    pot->pump_timer = PUMP_DELAY;
+    pot->pump_activated = 0;
+    pot->lcd.setCursor(11,3); 
+    pot->lcd.print("Pmp: DIS ");
+    pot->want_to_pump = false;
+  }
+}
+
+void do_led(int loop_cnt) {
+  
+  switch (loop_cnt % 8) {
+  case 0:
+    RGB_color(255, 0, 0); // Red
+    break;
+  case 1:
+    RGB_color(0, 255, 0); // Green
+    break;
+  case 2:
+    RGB_color(0, 0, 255); // Blue
+    break;
+  case 3:
+    RGB_color(255, 255, 125); // Raspberry
+    break;
+  case 4:
+    RGB_color(0, 255, 255); // Cyan
+    break;
+  case 5:
+    RGB_color(255, 0, 255); // Magenta
+    break;
+  case 6:
+    RGB_color(255, 255, 0); // Yellow
+    break;
+  case 7:
+    RGB_color(255, 255, 255); // White
+    break;
+    
+  default:
+    // statements
+    break;
+  }
+}
+
+
+
 void setup() {
 
   /*init Serial port*/
-  Serial.begin(9600);
+  Serial.begin(115200);
   while(!Serial); /*wait for serial port to connect - needed for Leonardo only*/
 
   /*init fan*/
-  pinMode(PIN_FAN, OUTPUT);
-  fan_off();
+  pinMode(PIN_FAN1, OUTPUT);
+  pinMode(PIN_FAN2, OUTPUT);
+  //fan_off();
 
   /*init PUMP*/
   pinMode(PIN_PUMP, OUTPUT);
   pump_off();
 
+  pinMode(PIN_VALVE1, OUTPUT);
+  pinMode(PIN_VALVE2, OUTPUT);
+
   /*init RTC*/
   Serial.println("Init RTC...");
 
   /*only set the date+time one time*/
-  //rtc.set(0, 15, 13, 25, 6, 2020); /*08:00:00 24.12.2014 //sec, min, hour, day, month, year*/
+  //rtc.set(0, 20, 14, 25, 8, 2020); /*08:00:00 24.12.2014 //sec, min, hour, day, month, year*/
 
   /*stop/pause RTC*/
   // rtc.stop();
@@ -233,16 +353,26 @@ void setup() {
     Pots[i].lcd.begin(20,4);
     Pots[i].lcd.backlight();//Power on the back light
   }
+
+  pinMode(SEN_WATER1,INPUT_PULLUP);
+  pinMode(SEN_WATER2,INPUT_PULLUP);  
+
+//
+//  pinMode(RED_PIN, OUTPUT);
+//  pinMode(GREEN_PIN, OUTPUT);
+//  pinMode(BLUE_PIN, OUTPUT);
+  
 }
 
 void loop() {
  
   int i = 0;
-  
-  //Serial.println("---------------------");
+
+  Serial.println("---------------------");
   for (i = 0; i < NOF_POTS; i++) {
 
-    Serial.println(i);
+    Pots[i].want_to_pump = false;
+    
     do_name(&Pots[i]);
     
     uint8_t hour = do_time(&Pots[i]);
@@ -252,14 +382,58 @@ void loop() {
       do_humidity(&Pots[i]);
     }
 
-    // Only allow pump to run during daytime 8.00-20.00
-    if ((hour > PUMP_MIN_HOUR) && (hour < PUMP_MAX_HOUR)) {
-      do_humidity_reg(&Pots[i]);
+    do_water_level(&Pots[i]);
+    
+    do_pump(&Pots[i], hour);
+
+    if (!Pots[i].water_level_alarm) {
+      // Only allow pump to run during daytime 
+      if ((hour > PUMP_MIN_HOUR) && (hour < PUMP_MAX_HOUR)) {
+          do_humidity_reg(&Pots[i]);
+      }
     }
   }
-    
-  delay(MAIN_DELAY);
 
+  bool pump = false;
+  for (i = 0; i < NOF_POTS; i++) {
+
+//    Serial.print("Loop count: ");
+//    Serial.println(loop_cnt);
+//    
+//    if (loop_cnt % 2) {
+//      Pots[i].want_to_pump = true;
+//    }
+//    else{      
+//      Pots[i].want_to_pump = false;
+//    }
+
+        
+    if (Pots[i].want_to_pump == true) {
+      Serial.print (Pots[i].name);
+      Serial.println(" OPEN");
+      open_valve(Pots[i].valve_pin);
+      pump = true;
+    }
+    else {
+      Serial.print (Pots[i].name);
+      Serial.println("CLOSE");
+      close_valve(Pots[i].valve_pin);
+    }
+  }
+  
+  if (pump) {
+    pump_on();
+  }
+  else {
+    pump_off();
+  }
+
+//fan_on();
+  
+  //do_led(loop_cnt);
+      
+  delay(MAIN_DELAY);
+  
   loop_cnt++;
 
 }
